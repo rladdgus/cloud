@@ -57,6 +57,7 @@ def start(config):
             save_state(state)
             safe("영상 제작/업로드", jobs.make_and_upload, config)
         if now >= next_comments:
+            safe("수동 업로드 반영", jobs.sync_manual_uploads)
             safe("댓글 관리", jobs.handle_comments, config)
             next_comments = now + timedelta(minutes=sched["comment_check_minutes"])
         if now >= next_stats:

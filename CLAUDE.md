@@ -25,5 +25,6 @@ A Python app that runs a Korean YouTube Shorts channel autonomously (`mode: shop
 - `ytauto/llm.py` — Anthropic SDK wrapper; structured outputs via `output_config.format`, server-side refusal fallbacks.
 - `ytauto/media.py` — TTS per scene, scene PNG rendering, ffmpeg segment/concat/music mix.
 - `ytauto/youtube.py` — OAuth (`client_secret*.json` → `token.json`), upload, comments, stats.
+- `cowork/` — Korean instructions for Claude Cowork scheduled tasks. With `upload.method: cowork`, `make_and_upload` writes `upload.json` / `업로드정보.txt` / `READY` into the output folder instead of uploading; Cowork inspects and uploads via YouTube Studio, then writes `uploaded.txt` (link) or `rejected.txt`, which `jobs.sync_manual_uploads` reads back. Keep these files in sync with that contract.
 - `docs/PLAN.md` is the (Korean) operating plan: tool comparison, costs, roadmap.
 - State lives in `data/state.json` (videos, handled comment IDs, used upload slots); config in `config.yaml`; secrets in `.env`.

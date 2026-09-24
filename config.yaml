@@ -77,6 +77,10 @@ schedule:
   stats_check_hours: 6
 
 upload:
+  # api    = 프로그램이 YouTube API로 바로 업로드
+  # cowork = 영상과 업로드정보.txt만 만들어 두고, Cowork가 검수한 뒤 YouTube Studio에서 올림
+  #          (Google 앱 검수 전에는 API로 올린 영상이 비공개로 잠길 수 있어 처음엔 cowork 추천)
+  method: cowork
   privacy: public           # public / unlisted / private
   category_id: "27"          # 27 = 교육
   made_for_kids: false

@@ -1,5 +1,6 @@
 """스케줄러가 부르는 작업들: 영상 제작·업로드, 댓글 관리, 통계 수집."""
 import json
+import re
 import shutil
 from datetime import datetime
 
@@ -65,7 +66,12 @@ def make_and_upload(config, dry_run=False):
     log.info("영상 완성: %s (%.1f초)", video, seconds)
 
     video_id = None
-    if not dry_run:
+    status = "test" if dry_run else "uploaded"
+    if not dry_run and config["upload"].get("method", "api") == "cowork":
+        write_upload_sheet(workdir, script, config)
+        status = "awaiting_upload"
+        notify(f"📦 검수·업로드 대기: {script['title']}\n{workdir}")
+    elif not dry_run:
         from . import youtube
 
         yt = youtube.service()
@@ -79,7 +85,7 @@ def make_and_upload(config, dry_run=False):
     state = load_state()
     state["videos"].append({
         **record, "id": video_id, "title": script["title"], "created": stamp,
-        "seconds": round(seconds, 1), "views": 0, "dry_run": dry_run,
+        "seconds": round(seconds, 1), "views": 0, "dry_run": dry_run, "status": status,
     })
     if record.get("product_id") and not dry_run:
         state.setdefault("used_products", []).append(record["product_id"])
@@ -88,14 +94,78 @@ def make_and_upload(config, dry_run=False):
     return video_id
 
 
+KEEP_FILES = ("final.mp4", "script.json", "upload.json", "업로드정보.txt", "READY")
+
+
 def _cleanup(workdir):
-    """중간 파일은 지우고 최종 영상과 대본만 남긴다. 오래된 결과물은 최근 30개만 유지."""
+    """중간 파일은 지우고 최종 영상과 업로드 자료만 남긴다. 처리가 끝난 결과물은 최근 30개만 유지."""
     for f in workdir.iterdir():
-        if f.name not in ("final.mp4", "script.json"):
+        if f.name not in KEEP_FILES:
             f.unlink()
-    runs = sorted(p for p in OUTPUT.iterdir() if p.is_dir())
-    for old in runs[:-30]:
+    finished = sorted(p for p in OUTPUT.iterdir() if p.is_dir() and not (p / "READY").exists())
+    for old in finished[:-30]:
         shutil.rmtree(old, ignore_errors=True)
+
+
+def write_upload_sheet(workdir, script, config):
+    """Cowork가 YouTube Studio에서 그대로 옮겨 적을 업로드 정보를 남긴다."""
+    shopping = config.get("mode") == "shopping"
+    info = {
+        "title": script["title"][:100],
+        "description": script["full_description"][:4900],
+        "tags": script["tags"][:15],
+        "first_comment": script.get("first_comment", ""),
+        "made_for_kids": config["upload"]["made_for_kids"],
+        "paid_promotion": shopping,
+        "altered_content": config["upload"]["synthetic_media"],
+        "category": "노하우/스타일" if shopping else "교육",
+        "visibility": {"public": "공개", "unlisted": "일부 공개", "private": "비공개"}[config["upload"]["privacy"]],
+    }
+    (workdir / "upload.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+    yes = lambda b: "예" if b else "아니요"  # noqa: E731
+    sheet = f"""[제목]
+{info['title']}
+
+[설명]
+{info['description']}
+
+[태그]
+{', '.join(info['tags'])}
+
+[설정]
+- 아동용: {yes(info['made_for_kids'])}
+- 유료 프로모션 포함: {yes(info['paid_promotion'])}
+- 변경되거나 합성된 콘텐츠: {yes(info['altered_content'])}
+- 카테고리: {info['category']}
+- 공개 상태: {info['visibility']}
+
+[첫 댓글 (올린 뒤 달고 고정)]
+{info['first_comment']}
+"""
+    (workdir / "업로드정보.txt").write_text(sheet, encoding="utf-8")
+    (workdir / "READY").write_text("검수·업로드 대기 중\n", encoding="utf-8")
+
+
+def sync_manual_uploads():
+    """Cowork가 남긴 uploaded.txt / rejected.txt를 읽어 상태에 반영한다."""
+    state = load_state()
+    changed = False
+    for v in state["videos"]:
+        if v.get("status") != "awaiting_upload":
+            continue
+        folder = OUTPUT / v["created"]
+        uploaded, rejected = folder / "uploaded.txt", folder / "rejected.txt"
+        if uploaded.exists():
+            m = re.search(r"(?:shorts/|v=|youtu\.be/)([\w-]{11})", uploaded.read_text(encoding="utf-8"))
+            if m:
+                v["id"], v["status"] = m.group(1), "uploaded"
+                changed = True
+        elif rejected.exists():
+            v["status"] = "rejected"
+            v["reject_reason"] = rejected.read_text(encoding="utf-8").strip()[:500]
+            changed = True
+    if changed:
+        save_state(state)
 
 
 def handle_comments(config):
@@ -138,6 +208,7 @@ def handle_comments(config):
 def update_stats(config):
     from . import youtube
 
+    sync_manual_uploads()
     state = load_state()
     ids = [v["id"] for v in state["videos"] if v.get("id")]
     if not ids:
