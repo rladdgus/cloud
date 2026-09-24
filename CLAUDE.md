@@ -4,19 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Python app that runs a Korean YouTube Shorts knowledge channel autonomously on the user's PC: Claude writes and fact-checks scripts, Edge TTS + Pillow + ffmpeg (bundled via `imageio-ffmpeg`) build the video, the YouTube Data API uploads it and handles comments. User-facing docs (`README.md`, `config.yaml` comments, log/notify messages) are in Korean.
+A Python app that runs a Korean YouTube Shorts channel autonomously (`mode: shopping` = Coupang Partners affiliate product shorts, `mode: knowledge` = trivia shorts) on the user's PC: Claude writes and fact-checks scripts, Edge TTS + Pillow + ffmpeg (bundled via `imageio-ffmpeg`) build the video, the YouTube Data API uploads it and handles comments. User-facing docs (`README.md`, `config.yaml` comments, log/notify messages) are in Korean.
 
 ## Commands
 
 - Install: `pip install -r requirements.txt` (Python 3.10+)
 - Run: `python run.py [auth|test|once|comments|stats|start]` — `test` builds a video without uploading
 - Lint: `python -m pyflakes ytauto run.py`
-- No test suite; to exercise the pipeline offline, monkeypatch `ytauto.llm.ask_json` / `ask_with_web_json` and `ytauto.media.synthesize` and call `jobs.make_and_upload(config, dry_run=True)`.
+- No test suite; to exercise the pipeline offline, monkeypatch `ytauto.llm.ask_json` / `ask_with_web_json`, `ytauto.media.synthesize` (and `media.load_image` in shopping mode) and call `jobs.make_and_upload(config, dry_run=True)`.
 
 ## Architecture
 
 - `run.py` — CLI + scheduler loop (`start`), catches per-job failures so the loop never dies.
-- `ytauto/jobs.py` — the three jobs: `make_and_upload`, `handle_comments`, `update_stats`.
+- `ytauto/jobs.py` — the three jobs: `make_and_upload` (dispatches to `shopping.produce` or `_produce_knowledge`, each returning `(script, video, record)`), `handle_comments`, `update_stats`.
+- `ytauto/shopping.py` — product pick (`products.txt` queue first, then Coupang best-sellers + Claude pick), script + ad-law review, Topview video with local fallback, disclosure overlay.
+- `ytauto/topview.py` / `ytauto/coupang.py` — thin REST clients (Topview m2v submit/poll; Coupang Partners HMAC auth).
 - `ytauto/content.py` — series selection (UCB bandit over views), writer prompt + JSON schema, reviewer (web-search fact check) with rewrite loop.
 - `ytauto/llm.py` — Anthropic SDK wrapper; structured outputs via `output_config.format`, server-side refusal fallbacks.
 - `ytauto/media.py` — TTS per scene, scene PNG rendering, ffmpeg segment/concat/music mix.

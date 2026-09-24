@@ -44,12 +44,10 @@ def my_channel(yt):
 
 def upload(yt, path, script, config):
     up = config["upload"]
-    footer = config["channel"].get("description_footer", "")
-    description = f"{script['description']}\n\n출처: {', '.join(script['sources'])}\n\n{footer}"
     body = {
         "snippet": {
             "title": script["title"][:100],
-            "description": description[:4900],
+            "description": script["full_description"][:4900],
             "tags": script["tags"][:15],
             "categoryId": up["category_id"],
             "defaultLanguage": config["channel"]["language"],
@@ -61,14 +59,29 @@ def upload(yt, path, script, config):
             "containsSyntheticMedia": up["synthetic_media"],
         },
     }
+    parts = "snippet,status"
+    if config.get("mode") == "shopping":
+        # "유료 PPL 포함" 표시 (제휴 수수료를 받는 영상)
+        body["snippet"]["categoryId"] = config["shopping"]["category_id"]
+        body["paidProductPlacementDetails"] = {"hasPaidProductPlacement": True}
+        parts += ",paidProductPlacementDetails"
     request = yt.videos().insert(
-        part="snippet,status", body=body,
+        part=parts, body=body,
         media_body=MediaFileUpload(str(path), mimetype="video/mp4", resumable=True, chunksize=8 * 1024 * 1024),
     )
     response = None
     while response is None:
         _, response = request.next_chunk()
     return response["id"]
+
+
+def comment(yt, video_id, text):
+    """채널 이름으로 첫 댓글을 단다. (API로는 고정할 수 없어 YouTube Studio에서 직접 고정해야 함)"""
+    try:
+        yt.commentThreads().insert(part="snippet", body={"snippet": {
+            "videoId": video_id, "topLevelComment": {"snippet": {"textOriginal": text}}}}).execute()
+    except HttpError as e:
+        log.warning("첫 댓글 작성 실패: %s", e)
 
 
 def video_stats(yt, video_ids):

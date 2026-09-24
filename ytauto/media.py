@@ -97,11 +97,7 @@ def fetch_background(keyword, w, h):
     except (requests.RequestException, ValueError, OSError) as e:
         log.warning("배경 사진 실패(%s): %s", keyword, e)
         return None
-    scale = max(w / img.width, h / img.height)
-    img = img.resize((int(img.width * scale) + 1, int(img.height * scale) + 1))
-    left, top = (img.width - w) // 2, (img.height - h) // 2
-    img = img.crop((left, top, left + w, top + h))
-    return ImageEnhance.Brightness(img.filter(ImageFilter.GaussianBlur(1))).enhance(0.55)
+    return ImageEnhance.Brightness(_cover(img, w, h).filter(ImageFilter.GaussianBlur(1))).enhance(0.55)
 
 
 def _wrap(draw, text, font, max_width):
@@ -117,9 +113,35 @@ def _wrap(draw, text, font, max_width):
     return lines
 
 
-def render_scene(caption, keyword, series, index, total, out_path, config, font_path):
+def load_image(url):
+    try:
+        data = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"}).content
+        return Image.open(io.BytesIO(data)).convert("RGB")
+    except (requests.RequestException, OSError) as e:
+        log.warning("이미지 다운로드 실패 %s: %s", url, e)
+        return None
+
+
+def _cover(img, w, h):
+    scale = max(w / img.width, h / img.height)
+    img = img.resize((int(img.width * scale) + 1, int(img.height * scale) + 1))
+    left, top = (img.width - w) // 2, (img.height - h) // 2
+    return img.crop((left, top, left + w, top + h))
+
+
+def render_scene(caption, keyword, series, index, total, out_path, config, font_path, product_image=None):
     w, h = config["video"]["width"], config["video"]["height"]
-    img = fetch_background(keyword, w, h) or _gradient(w, h, *series["color"])
+    if product_image is not None:
+        # 흐린 제품 사진 배경 + 가운데 위쪽에 선명한 제품 사진
+        img = ImageEnhance.Brightness(_cover(product_image, w, h).filter(ImageFilter.GaussianBlur(30))).enhance(0.45)
+        card = product_image.copy()
+        card.thumbnail((880, 880))
+        cx, cy = (w - card.width) // 2, 330 + (880 - card.height) // 2
+        img.paste(card, (cx, cy))
+        text_center = 1450
+    else:
+        img = fetch_background(keyword, w, h) or _gradient(w, h, *series["color"])
+        text_center = h / 2
     draw = ImageDraw.Draw(img)
 
     # 상단 시리즈 라벨
@@ -131,9 +153,9 @@ def render_scene(caption, keyword, series, index, total, out_path, config, font_
 
     # 가운데 큰 자막
     font = ImageFont.truetype(font_path, 96)
-    lines = _wrap(draw, caption, font, w - 160)[:4]
+    lines = _wrap(draw, caption, font, w - 160)[: 3 if product_image is not None else 4]
     line_h = 130
-    y = h / 2 - line_h * (len(lines) - 1) / 2
+    y = text_center - line_h * (len(lines) - 1) / 2
     for line in lines:
         draw.text((w / 2, y), line, font=font, fill=(255, 255, 255), anchor="mm",
                   stroke_width=8, stroke_fill=(0, 0, 0))
@@ -156,7 +178,7 @@ def _run(args):
         raise RuntimeError(f"ffmpeg 실패: {proc.stderr[-800:]}")
 
 
-def build_video(script, series, workdir, config):
+def build_video(script, series, workdir, config, product_image=None):
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     font_path = find_font(config)
@@ -169,7 +191,8 @@ def build_video(script, series, workdir, config):
         image = workdir / f"s{i}.png"
         segment = workdir / f"s{i}.mp4"
         synthesize(scene["narration"], audio, config)
-        render_scene(scene["caption"], scene["image_keyword"], series, i, len(scenes), image, config, font_path)
+        render_scene(scene["caption"], scene.get("image_keyword", ""), series, i, len(scenes), image, config,
+                     font_path, product_image)
         dur = duration(audio) + 0.25
         frames = int(dur * fps) + 1
         zoom = f"zoompan=z='min(zoom+0.0007,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={w}x{h}:fps={fps}"
@@ -200,3 +223,22 @@ def build_video(script, series, workdir, config):
     if total > 180:
         log.warning("영상 길이 %.1f초 - 쇼츠 한도(3분)를 넘어 일반 영상으로 올라가요", total)
     return final, total
+
+
+def add_notice(video_in, video_out, text, config):
+    """영상 위쪽에 광고 표시 문구를 계속 띄운다 (공정위 추천·보증 심사지침)."""
+    w = config["video"]["width"]
+    font = ImageFont.truetype(find_font(config), 34)
+    strip = Image.new("RGBA", (w, 70), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(strip)
+    tw = draw.textlength(text, font=font)
+    draw.rounded_rectangle([(w - tw) / 2 - 20, 8, (w + tw) / 2 + 20, 62], radius=20, fill=(0, 0, 0, 150))
+    draw.text((w / 2, 35), text, font=font, fill=(255, 255, 255, 235), anchor="mm")
+    png = Path(video_in).with_name("notice.png")
+    strip.save(png)
+    _run([
+        "-i", str(video_in), "-i", str(png),
+        "-filter_complex", f"[0:v]scale={w}:-2[v];[v][1:v]overlay=0:40,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "copy", str(video_out),
+    ])
+    png.unlink()

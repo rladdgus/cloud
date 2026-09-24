@@ -27,7 +27,8 @@ COMMENT_SCHEMA = {
     "additionalProperties": False,
 }
 
-COMMENT_SYSTEM = """당신은 한국어 지식 쇼츠 채널 운영자로서 댓글에 답합니다.
+COMMENT_SYSTEM = """당신은 한국어 쇼츠 채널 운영자로서 댓글에 답합니다.
+- 쇼핑 영상에서 구매처·링크를 물으면 "설명란과 댓글에 링크가 있어요"라고 안내. 가격·재고·배송은 약속하지 말고 링크에서 확인하도록.
 - reply: 질문, 칭찬, 추가 정보, 건전한 반론. 1~2문장, 친근하고 정중하게. 모르는 건 모른다고.
 - hold: 스팸, 광고, 링크 도배, 욕설·혐오, 개인정보 노출. (검토 대기로 숨김)
 - ignore: 이모지만, 의미 없는 짧은 글, 논쟁 유도.
@@ -35,34 +36,53 @@ COMMENT_SYSTEM = """당신은 한국어 지식 쇼츠 채널 운영자로서 댓
 hold/ignore일 때 reply는 빈 문자열."""
 
 
-def make_and_upload(config, dry_run=False):
-    state = load_state()
+def _produce_knowledge(config, state, workdir):
     series, script = content.create_approved_script(config, state)
     if script is None:
         notify(f"⚠️ [{series['name']}] 대본이 검수를 통과하지 못해 이번 업로드를 건너뛰었어요.")
         return None
+    video, _ = media.build_video(script, series, workdir, config)
+    footer = config["channel"].get("description_footer", "")
+    script["full_description"] = f"{script['description']}\n\n출처: {', '.join(script['sources'])}\n\n{footer}"
+    return script, video, {"series": series["id"], "topic": script["topic"]}
 
+
+def make_and_upload(config, dry_run=False):
+    from . import shopping
+
+    state = load_state()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     workdir = OUTPUT / stamp
     workdir.mkdir(parents=True, exist_ok=True)
+    produce = shopping.produce if config.get("mode") == "shopping" else _produce_knowledge
+    result = produce(config, state, workdir)
+    if result is None:
+        shutil.rmtree(workdir, ignore_errors=True)
+        return None
+    script, video, record = result
     (workdir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
-    video, seconds = media.build_video(script, series, workdir, config)
+    seconds = media.duration(video)
     log.info("영상 완성: %s (%.1f초)", video, seconds)
 
     video_id = None
     if not dry_run:
         from . import youtube
 
-        video_id = youtube.upload(youtube.service(), video, script, config)
+        yt = youtube.service()
+        video_id = youtube.upload(yt, video, script, config)
+        if script.get("first_comment"):
+            youtube.comment(yt, video_id, script["first_comment"])
         notify(f"✅ 업로드 완료: {script['title']}\nhttps://youtube.com/shorts/{video_id}")
     else:
         notify(f"🧪 테스트 모드: 업로드 없이 영상만 만들었어요 → {video}")
 
     state = load_state()
     state["videos"].append({
-        "id": video_id, "series": series["id"], "topic": script["topic"], "title": script["title"],
-        "created": stamp, "seconds": round(seconds, 1), "views": 0, "dry_run": dry_run,
+        **record, "id": video_id, "title": script["title"], "created": stamp,
+        "seconds": round(seconds, 1), "views": 0, "dry_run": dry_run,
     })
+    if record.get("product_id") and not dry_run:
+        state.setdefault("used_products", []).append(record["product_id"])
     save_state(state)
     _cleanup(workdir)
     return video_id
