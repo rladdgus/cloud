@@ -13,9 +13,12 @@
 2. **대본 쓰기와 광고 심의**
    - 가짜 사용 후기, "최저가"·"1위" 같은 근거 없는 표현, 의학적 효능 주장이 있으면 다시 써요.
    - 끝내 통과하지 못한 상품은 올리지 않아요.
-3. **영상 만들기**
-   - **Topview**(유료)가 연결돼 있으면 제품 페이지의 사진·영상과 AI 아바타로 광고 영상을 만들어요. 내보내기 1회당 5크레딧이 들어요.
-   - Topview가 없거나 실패하면, 제품 사진과 AI 음성으로 직접 만들어요.
+3. **영상 만들기** (기본값: 자체 스튜디오)
+   - 제품 사진을 **Kling**(fal.ai)으로 5초짜리 움직이는 클립으로 만들어요. 앞쪽 2장면에만 쓰고, 클립 1개에 약 $0.35가 들어요.
+   - AI 음성에 맞춰 **말하는 단어만 크게 뜨는 자막**을 입혀요.
+   - 위쪽에는 훅 제목, 아래쪽에는 진행 막대를 넣어 9:16 쇼츠로 합쳐요.
+   - `shopping.engine: topview`로 바꾸면 Topview의 아바타 광고 영상을 써요. Topview가 실패하면 자체 스튜디오로 돌아와요.
+   - 여러 방식의 비교와 전체 운영 계획은 [`docs/PLAN.md`](docs/PLAN.md)에 있어요.
 4. **광고 표시**: 영상 위에 "광고 · 쿠팡 파트너스" 문구를 계속 띄우고, 설명란에 쿠팡 필수 문구를 넣고, YouTube의 "유료 PPL 포함" 표시를 켜요.
 5. **업로드 후**: 설명란과 첫 댓글에 구매 링크를 넣어요.
    - 쇼츠 화면에서는 링크를 누를 수 없어서, 시청자는 설명란에서 복사해 가야 해요.
@@ -39,11 +42,19 @@ GitHub에서 **Code → Download ZIP**을 눌러 받은 뒤 압축을 풀어요.
 4. (선택) [Pexels](https://www.pexels.com/api/)에서 무료 키를 받아 `PEXELS_API_KEY`에 넣으면 배경에 실제 사진이 들어가요. **강력 추천합니다.**
 
 ### 3-1. 쇼핑 모드 준비
+0. **fal.ai**(https://fal.ai)에 가입하고 크레딧을 충전한 뒤, Dashboard → Keys에서 키를 만들어 `.env`의 `FAL_KEY`에 넣으세요. 제품 사진을 움직이는 영상으로 만들 때 써요.
+   - 더 자연스러운 음성을 원하면 ElevenLabs 키를 `ELEVENLABS_API_KEY`에 넣으세요. 그다음 `config.yaml`에서 `tts.engine: elevenlabs`로 바꾸고 `elevenlabs_voice_id`를 채우세요.
 1. **쿠팡 파트너스**(https://partners.coupang.com)에 가입하세요. 채널 주소를 등록하고 승인을 받아야 해요.
 2. 쿠팡 파트너스의 **링크 생성**에서 상품 링크를 만들어 `products.txt`에 한 줄씩 넣으세요. 하루 2개씩 올리면 일주일에 14개가 필요해요.
 3. **Topview**(https://www.topview.ai)에 가입하고 요금제를 구독하세요. API 크레딧은 웹사이트 크레딧을 같이 써요. 오른쪽 위 계정 → **API Settings**에서 키(Key)와 UID를 받아 `.env`의 `TOPVIEW_API_KEY`와 `TOPVIEW_UID`에 넣으세요.
    - Topview 없이 무료로 하려면 `products.txt`에 `링크 | 상품명 | 제품 사진 주소` 형식으로 넣으세요.
 4. 누적 판매 15만 원을 넘으면 쿠팡 파트너스에서 API 키를 받아 `.env`의 `COUPANG_ACCESS_KEY`와 `COUPANG_SECRET_KEY`에 넣으세요. 그때부터는 상품도 알아서 골라요.
+
+### 3-2. YouTube 채널 만들기
+1. https://www.youtube.com 에 로그인하고, 프로필 → **채널 만들기**를 누르세요. 이름은 `config.yaml`의 `channel.name`과 맞춰 주세요.
+   - 나중에 여러 사람이 관리하거나 채널을 옮기려면 **브랜드 계정**으로 만드는 게 좋아요.
+2. https://www.youtube.com/verify 에서 **휴대폰 인증**을 하세요. 인증해야 맞춤 썸네일과 외부 링크 같은 기능이 열려요.
+3. 아래 4단계(YouTube 연결)를 마친 뒤 `start.bat channel`을 실행하면 채널 설명·키워드·배너가 자동으로 설정돼요. 프로필 사진은 `assets/channel/profile.png`로 만들어 주니, YouTube Studio → 맞춤설정에서 직접 올려 주세요.
 
 ### 4. YouTube 연결
 1. https://console.cloud.google.com 에서 새 프로젝트를 만드세요.
@@ -62,6 +73,7 @@ GitHub에서 **Code → Download ZIP**을 눌러 받은 뒤 압축을 풀어요.
 
 | 명령 | 하는 일 |
 |---|---|
+| `start.bat channel` | 채널 설명·키워드·배너 설정 (처음 한 번) |
 | `start.bat test` | 영상 1개를 만들기만 함 (업로드 안 함). `output/` 폴더에서 확인 |
 | `start.bat once` | 영상 1개를 만들어 바로 업로드 |
 | `start.bat` | **자동 운영 시작.** 이 창을 켜 둔 채로 두세요 |
@@ -83,6 +95,7 @@ Mac·Linux에서는 `start.bat` 대신 `./start.sh`를 쓰세요.
 ## 비용 (대략)
 
 - Claude API: 영상 1개에 약 $0.03~0.20. 하루 2개면 한 달에 약 $2~12예요.
+- Kling (fal.ai): 영상 1개에 약 $0.70 (클립 2개). 하루 2개면 한 달에 약 $42예요. `studio.motion.max_clips`로 조절할 수 있어요.
 - Topview (쇼핑 모드, 선택): 영상 1개에 5크레딧. 요금제는 Topview 사이트에서 확인하세요.
 - 음성(Edge TTS), 배경 사진(Pexels), YouTube API는 무료예요.
 - YouTube API 무료 한도로는 하루 약 6개까지 업로드할 수 있어요.
@@ -94,3 +107,4 @@ Mac·Linux에서는 `start.bat` 대신 `./start.sh`를 쓰세요.
 - 성과는 보장되지 않아요. 쇼츠는 보통 30~100개쯤 올려야 알고리즘 반응이 보이기 시작해요.
 - YouTube의 "반복적·대량 생산 콘텐츠" 정책 때문에 수익 창출 심사에서 떨어질 수 있어요. 가끔 직접 영상을 보고, 반응이 좋은 영상 스타일로 `config.yaml`의 `brief`를 다듬어 주면 훨씬 유리해요.
 - 배경 음악은 저작권 없는 음악만 쓰세요. YouTube 오디오 보관함 음악을 추천해요.
+

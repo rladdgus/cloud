@@ -18,9 +18,12 @@ A Python app that runs a Korean YouTube Shorts channel autonomously (`mode: shop
 - `run.py` — CLI + scheduler loop (`start`), catches per-job failures so the loop never dies.
 - `ytauto/jobs.py` — the three jobs: `make_and_upload` (dispatches to `shopping.produce` or `_produce_knowledge`, each returning `(script, video, record)`), `handle_comments`, `update_stats`.
 - `ytauto/shopping.py` — product pick (`products.txt` queue first, then Coupang best-sellers + Claude pick), script + ad-law review, Topview video with local fallback, disclosure overlay.
+- `ytauto/studio.py` — default shopping video engine: per-scene TTS with word timings (Edge `WordBoundary` or ElevenLabs `with-timestamps`), optional Kling clips via fal.ai queue API, base frame + timed caption PNG overlays composited with ffmpeg.
+- `ytauto/channel.py` — `run.py channel`: generates profile/banner art, sets description/keywords/banner via API.
 - `ytauto/topview.py` / `ytauto/coupang.py` — thin REST clients (Topview m2v submit/poll; Coupang Partners HMAC auth).
 - `ytauto/content.py` — series selection (UCB bandit over views), writer prompt + JSON schema, reviewer (web-search fact check) with rewrite loop.
 - `ytauto/llm.py` — Anthropic SDK wrapper; structured outputs via `output_config.format`, server-side refusal fallbacks.
 - `ytauto/media.py` — TTS per scene, scene PNG rendering, ffmpeg segment/concat/music mix.
 - `ytauto/youtube.py` — OAuth (`client_secret*.json` → `token.json`), upload, comments, stats.
+- `docs/PLAN.md` is the (Korean) operating plan: tool comparison, costs, roadmap.
 - State lives in `data/state.json` (videos, handled comment IDs, used upload slots); config in `config.yaml`; secrets in `.env`.

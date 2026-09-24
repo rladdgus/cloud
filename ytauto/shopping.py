@@ -1,7 +1,9 @@
 """쇼핑 쇼츠: 상품 고르기 → 대본·검수 → 영상 (Topview 또는 자체 제작) → 광고 표시."""
 import json
 
-from . import coupang, llm, media, topview
+import re
+
+from . import coupang, llm, media, studio, topview
 from .common import ROOT, log, notify
 
 QUEUE_FILE = ROOT / "products.txt"
@@ -10,20 +12,25 @@ SCRIPT_SCHEMA = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "hook_title": {"type": "string"},
         "description": {"type": "string"},
         "tags": {"type": "array", "items": {"type": "string"}},
         "scenes": {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {"narration": {"type": "string"}, "caption": {"type": "string"}},
-                "required": ["narration", "caption"],
+                "properties": {
+                    "narration": {"type": "string"},
+                    "caption": {"type": "string"},
+                    "motion_prompt": {"type": "string"},
+                },
+                "required": ["narration", "caption", "motion_prompt"],
                 "additionalProperties": False,
             },
         },
         "comment": {"type": "string"},
     },
-    "required": ["title", "description", "tags", "scenes", "comment"],
+    "required": ["title", "hook_title", "description", "tags", "scenes", "comment"],
     "additionalProperties": False,
 }
 
@@ -53,7 +60,9 @@ WRITER_SYSTEM = """당신은 한국어 쇼핑 쇼츠(제품 소개 숏폼) 전�
   · 직접 써 본 척하는 가짜 후기("제가 써봤는데", "한 달 써보니") 금지. "~라고 해요", "~할 수 있어요"처럼 소개하는 말투로.
   · 확인할 수 없는 수치, "최저가", "1위", "완벽", 질병 치료·예방이나 다이어트 효과 같은 의학적 주장 금지.
   · 가격은 바뀔 수 있으니 구체적 금액을 말하지 말 것.
-- caption: 화면에 크게 띄울 8~16자 문구.
+- hook_title: 영상 내내 위쪽에 고정되는 8~16자 제목 (예: "좁은 싱크대 필수템").
+- caption: 해당 장면의 핵심 8~16자 문구 (자막이 없을 때 대체용).
+- motion_prompt: 제품 사진을 짧은 영상으로 만들 때 쓸 영어 카메라 연출 1문장 (예: "Slow push-in on the product on a clean kitchen counter"). 제품 모양·색은 바꾸지 말 것.
 - title: 35자 이내, 궁금증을 주되 거짓 없이, 끝에 #shorts.
 - description: 2~3문장 제품 소개 (링크와 광고 문구는 프로그램이 따로 붙임).
 - comment: 채널이 영상에 다는 첫 댓글 1~2문장 (구매 링크는 프로그램이 붙임)."""
@@ -79,6 +88,11 @@ def _queue():
         items.append({"id": parts[0], "link": parts[0], "name": parts[1] if len(parts) > 1 else "",
                       "image": parts[2] if len(parts) > 2 else "", "category": "직접 추가"})
     return items
+
+
+def hd_image(url):
+    """쿠팡 썸네일 주소의 크기 부분을 큰 이미지로 바꾼다 (실패하면 원래 주소 사용)."""
+    return re.sub(r"/thumbnails/remote/\d+x\d+ex/", "/thumbnails/remote/492x492ex/", url or "")
 
 
 def pick_product(config, state):
@@ -156,28 +170,30 @@ def produce(config, state, workdir):
         notify(f"⚠️ [{product.get('name') or product['link']}] 대본이 검수를 통과하지 못해 건너뛰었어요.")
         return None
 
-    raw = workdir / "raw.mp4"
-    narration = " ".join(s["narration"] for s in script["scenes"])
+    final = workdir / "final.mp4"
+    engine = shop.get("engine", "studio")
     made = False
-    if topview.available() and shop["topview"].get("enabled", True):
+    if engine == "topview" and topview.available():
+        raw = workdir / "raw.mp4"
         try:
-            topview.make_video(product, narration, config, raw)
+            topview.make_video(product, " ".join(s["narration"] for s in script["scenes"]), config, raw)
+            media.add_notice(raw, final, shop["disclosure_short"], config)
+            raw.unlink()
             made = True
         except Exception as e:
-            log.warning("Topview 실패, 자체 제작으로 전환: %s", e)
+            log.warning("Topview 실패, 자체 스튜디오로 전환: %s", e)
     if not made:
-        image = media.load_image(product["image"]) if product.get("image") else None
+        product["image_hd"] = hd_image(product.get("image"))
+        image = None
+        for url in (product["image_hd"], product.get("image")):
+            image = media.load_image(url) if url else None
+            if image is not None:
+                break
         if image is None:
-            notify(f"⚠️ [{product['link']}] 제품 사진이 없어 자체 제작을 할 수 없어요. "
-                   "Topview를 연결하거나 products.txt에 '링크 | 상품명 | 이미지주소' 형식으로 넣어 주세요.")
+            notify(f"⚠️ [{product['link']}] 제품 사진을 받을 수 없어요. "
+                   "products.txt에 '링크 | 상품명 | 이미지주소' 형식으로 넣어 주세요.")
             return None
-        series = {"name": shop["label"], "color": ["#111827", "#000000"]}
-        built, _ = media.build_video(script, series, workdir, config, product_image=image)
-        built.replace(raw)
-
-    final = workdir / "final.mp4"
-    media.add_notice(raw, final, shop["disclosure_short"], config)
-    raw.unlink()
+        studio.build(script, product, image, workdir, config).replace(final)
 
     footer = config["channel"].get("description_footer", "")
     script["full_description"] = (

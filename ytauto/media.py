@@ -209,20 +209,25 @@ def build_video(script, series, workdir, config, product_image=None):
     joined = workdir / "joined.mp4"
     _run(["-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(joined)])
 
-    final = workdir / "final.mp4"
-    music = config["video"].get("background_music")
-    if music and Path(music).exists():
-        _run([
-            "-i", str(joined), "-stream_loop", "-1", "-i", music,
-            "-filter_complex", "[1:a]volume=0.08[m];[0:a][m]amix=inputs=2:duration=first[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(final),
-        ])
-    else:
-        joined.replace(final)
+    final = mix_music(joined, workdir / "final.mp4", config)
     total = duration(final)
     if total > 180:
         log.warning("영상 길이 %.1f초 - 쇼츠 한도(3분)를 넘어 일반 영상으로 올라가요", total)
     return final, total
+
+
+def mix_music(video_in, video_out, config):
+    """config의 배경 음악을 작게 깔고, 없으면 파일 이름만 바꾼다."""
+    music = config["video"].get("background_music")
+    if music and Path(music).exists():
+        _run([
+            "-i", str(video_in), "-stream_loop", "-1", "-i", music,
+            "-filter_complex", "[1:a]volume=0.08[m];[0:a][m]amix=inputs=2:duration=first[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", str(video_out),
+        ])
+    else:
+        Path(video_in).replace(video_out)
+    return Path(video_out)
 
 
 def add_notice(video_in, video_out, text, config):

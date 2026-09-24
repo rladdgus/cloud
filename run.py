@@ -1,6 +1,7 @@
 """유튜브 채널 자동화 실행 파일.
 
   python run.py auth              YouTube 계정 연결 (처음 한 번)
+  python run.py channel           채널 설명·키워드·배너 설정 + 프로필 사진 만들기
   python run.py test              영상 1개를 만들기만 하고 업로드는 안 함
   python run.py once              영상 1개를 만들어 바로 업로드
   python run.py comments          댓글 한 번 처리
@@ -74,6 +75,10 @@ def main():
 
         channel = youtube.my_channel(youtube.service(interactive=True))
         print(f"연결 완료: {channel['snippet']['title']}")
+    elif cmd == "channel":
+        from ytauto import channel
+
+        channel.apply(config)
     elif cmd == "test":
         jobs.make_and_upload(config, dry_run=True)
     elif cmd == "once":
