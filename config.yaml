@@ -1,0 +1,67 @@
+# 채널 자동화 설정. 이 파일만 고치면 동작을 바꿀 수 있어요.
+
+channel:
+  name: "1분 호기심"
+  language: ko
+  # 모든 영상 설명 끝에 붙는 문구
+  description_footer: |
+    매일 1분, 몰랐던 세상 이야기 🔍
+    #쇼츠 #상식 #호기심
+
+# 시리즈(주제). 조회수가 잘 나오는 시리즈가 자동으로 더 자주 선택돼요.
+series:
+  - id: animals
+    name: "알고 보면 신기한 동물"
+    brief: "동물의 놀랍고 사실로 확인된 습성·능력. 아이와 가족이 함께 봐도 좋은 톤이지만 어린이 전용 콘텐츠는 아님."
+    color: ["#0f766e", "#134e4a"]
+  - id: science
+    name: "1분 과학·우주"
+    brief: "일상 속 현상이나 우주에 대한 '왜?' 질문에 쉽게 답하기."
+    color: ["#1e3a8a", "#0f172a"]
+  - id: history
+    name: "역사 속 황당한 순간"
+    brief: "실제로 있었던, 믿기 힘든 역사적 사건·인물 일화. 출처가 분명한 것만."
+    color: ["#7c2d12", "#1c1917"]
+  - id: body
+    name: "내 몸의 비밀"
+    brief: "인체에 관한 신기한 사실. 의학적 조언이나 치료 권유는 절대 하지 않음."
+    color: ["#9d174d", "#1f1235"]
+  - id: psychology
+    name: "심리학 한 조각"
+    brief: "잘 알려진 심리학 실험·효과를 쉽게 소개. 과장이나 단정 금지."
+    color: ["#5b21b6", "#111827"]
+
+schedule:
+  # 업로드 시각 (컴퓨터 현지 시간). 쇼츠는 하루 1~3개가 적당해요.
+  upload_times: ["12:30", "19:30"]
+  comment_check_minutes: 30
+  stats_check_hours: 6
+
+upload:
+  privacy: public           # public / unlisted / private
+  category_id: "27"          # 27 = 교육
+  made_for_kids: false
+  synthetic_media: true      # AI 생성 음성 사용 표시 (YouTube 정책)
+
+quality:
+  min_score: 8               # 검수 점수(10점 만점)가 이 이상일 때만 업로드
+  max_rewrites: 2
+  fact_check_web: true       # 웹 검색으로 사실 확인
+
+comments:
+  enabled: true
+  max_replies_per_run: 15
+
+tts:
+  voice: "ko-KR-SunHiNeural"   # 남성: ko-KR-InJoonNeural
+  rate: "+8%"
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  font_path: ""              # 비워 두면 자동으로 찾아요
+  background_music: ""       # mp3 경로 (저작권 없는 음악만!)
+
+claude:
+  model: "claude-opus-5"

@@ -1,0 +1,135 @@
+"""스케줄러가 부르는 작업들: 영상 제작·업로드, 댓글 관리, 통계 수집."""
+import json
+import shutil
+from datetime import datetime
+
+from . import content, llm, media
+from .common import OUTPUT, load_state, log, notify, save_state
+
+COMMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decisions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "action": {"type": "string", "enum": ["reply", "hold", "ignore"]},
+                    "reply": {"type": "string"},
+                },
+                "required": ["id", "action", "reply"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["decisions"],
+    "additionalProperties": False,
+}
+
+COMMENT_SYSTEM = """당신은 한국어 지식 쇼츠 채널 운영자로서 댓글에 답합니다.
+- reply: 질문, 칭찬, 추가 정보, 건전한 반론. 1~2문장, 친근하고 정중하게. 모르는 건 모른다고.
+- hold: 스팸, 광고, 링크 도배, 욕설·혐오, 개인정보 노출. (검토 대기로 숨김)
+- ignore: 이모지만, 의미 없는 짧은 글, 논쟁 유도.
+- 정치·종교 논쟁에 가담하지 말고, 의료·투자 조언은 하지 마세요. 절대 AI라고 거짓 부정하지 마세요.
+hold/ignore일 때 reply는 빈 문자열."""
+
+
+def make_and_upload(config, dry_run=False):
+    state = load_state()
+    series, script = content.create_approved_script(config, state)
+    if script is None:
+        notify(f"⚠️ [{series['name']}] 대본이 검수를 통과하지 못해 이번 업로드를 건너뛰었어요.")
+        return None
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    workdir = OUTPUT / stamp
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+    video, seconds = media.build_video(script, series, workdir, config)
+    log.info("영상 완성: %s (%.1f초)", video, seconds)
+
+    video_id = None
+    if not dry_run:
+        from . import youtube
+
+        video_id = youtube.upload(youtube.service(), video, script, config)
+        notify(f"✅ 업로드 완료: {script['title']}\nhttps://youtube.com/shorts/{video_id}")
+    else:
+        notify(f"🧪 테스트 모드: 업로드 없이 영상만 만들었어요 → {video}")
+
+    state = load_state()
+    state["videos"].append({
+        "id": video_id, "series": series["id"], "topic": script["topic"], "title": script["title"],
+        "created": stamp, "seconds": round(seconds, 1), "views": 0, "dry_run": dry_run,
+    })
+    save_state(state)
+    _cleanup(workdir)
+    return video_id
+
+
+def _cleanup(workdir):
+    """중간 파일은 지우고 최종 영상과 대본만 남긴다. 오래된 결과물은 최근 30개만 유지."""
+    for f in workdir.iterdir():
+        if f.name not in ("final.mp4", "script.json"):
+            f.unlink()
+    runs = sorted(p for p in OUTPUT.iterdir() if p.is_dir())
+    for old in runs[:-30]:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def handle_comments(config):
+    if not config["comments"]["enabled"]:
+        return
+    from . import youtube
+
+    yt = youtube.service()
+    state = load_state()
+    channel_id = state.get("channel_id") or youtube.my_channel(yt)["id"]
+    state["channel_id"] = channel_id
+    done = set(state["replied_comments"])
+    comments = youtube.new_comments(yt, channel_id, done)[: config["comments"]["max_replies_per_run"]]
+    if not comments:
+        return
+    titles = {v["id"]: v["title"] for v in state["videos"] if v.get("id")}
+    for c in comments:
+        c["video_title"] = titles.get(c["video_id"], "")
+    result = llm.ask_json(
+        config["claude"]["model"], COMMENT_SYSTEM,
+        "다음 댓글들을 처리하세요:\n" + json.dumps(comments, ensure_ascii=False, indent=2),
+        COMMENT_SCHEMA, effort="low",
+    )
+    valid = {c["id"] for c in comments}
+    counts = {"reply": 0, "hold": 0, "ignore": 0}
+    for d in result["decisions"]:
+        if d["id"] not in valid:
+            continue
+        if d["action"] == "reply" and d["reply"].strip():
+            youtube.reply(yt, d["id"], d["reply"].strip())
+        elif d["action"] == "hold":
+            youtube.moderate(yt, d["id"], "heldForReview")
+        counts[d["action"]] += 1
+        done.add(d["id"])
+    state["replied_comments"] = list(done)[-5000:]
+    save_state(state)
+    log.info("댓글 처리: 답글 %d, 숨김 %d, 무시 %d", counts["reply"], counts["hold"], counts["ignore"])
+
+
+def update_stats(config):
+    from . import youtube
+
+    state = load_state()
+    ids = [v["id"] for v in state["videos"] if v.get("id")]
+    if not ids:
+        return
+    stats = youtube.video_stats(youtube.service(), ids)
+    for v in state["videos"]:
+        if v.get("id") in stats:
+            v.update(stats[v["id"]])
+    save_state(state)
+    by_series = {}
+    for v in state["videos"]:
+        if v.get("id"):
+            by_series.setdefault(v["series"], []).append(v.get("views", 0))
+    summary = ", ".join(f"{k}: 평균 {sum(x) // len(x)}회" for k, x in by_series.items())
+    log.info("시리즈별 조회수 - %s", summary)
