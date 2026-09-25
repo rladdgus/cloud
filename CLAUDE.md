@@ -19,6 +19,7 @@ A Python app that runs a Korean YouTube Shorts channel autonomously (`mode: shop
 - `ytauto/jobs.py` — the three jobs: `make_and_upload` (dispatches to `shopping.produce` or `_produce_knowledge`, each returning `(script, video, record)`), `handle_comments`, `update_stats`.
 - `ytauto/shopping.py` — product pick (`products.txt` queue first, then Coupang best-sellers + Claude pick), script + ad-law review, Topview video with local fallback, disclosure overlay.
 - `ytauto/studio.py` — default shopping video engine: per-scene TTS with word timings (Edge `WordBoundary` or ElevenLabs `with-timestamps`), optional Kling clips via fal.ai queue API, base frame + timed caption PNG overlays composited with ffmpeg.
+- `ytauto/linkpage.py` — profile link-in-bio page: per-product numbers (`reserve_number`, gaps allowed), `linkpage/items.json` → regex-replaces `const ITEMS = [...]` in `linkpage/index.html`, optional Netlify zip deploy. Items are added only once a video is actually uploaded (API upload or `sync_manual_uploads`).
 - `ytauto/channel.py` — `run.py channel`: generates profile/banner art, sets description/keywords/banner via API.
 - `ytauto/topview.py` / `ytauto/coupang.py` — thin REST clients (Topview m2v submit/poll; Coupang Partners HMAC auth).
 - `ytauto/content.py` — series selection (UCB bandit over views), writer prompt + JSON schema, reviewer (web-search fact check) with rewrite loop.

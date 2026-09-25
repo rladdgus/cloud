@@ -37,7 +37,7 @@ COMMENT_SYSTEM = """당신은 한국어 쇼츠 채널 운영자로서 댓글에 
 hold/ignore일 때 reply는 빈 문자열."""
 
 
-def _produce_knowledge(config, state, workdir):
+def _produce_knowledge(config, state, workdir, dry_run=False):
     series, script = content.create_approved_script(config, state)
     if script is None:
         notify(f"⚠️ [{series['name']}] 대본이 검수를 통과하지 못해 이번 업로드를 건너뛰었어요.")
@@ -56,7 +56,7 @@ def make_and_upload(config, dry_run=False):
     workdir = OUTPUT / stamp
     workdir.mkdir(parents=True, exist_ok=True)
     produce = shopping.produce if config.get("mode") == "shopping" else _produce_knowledge
-    result = produce(config, state, workdir)
+    result = produce(config, state, workdir, dry_run=dry_run)
     if result is None:
         shutil.rmtree(workdir, ignore_errors=True)
         return None
@@ -79,6 +79,7 @@ def make_and_upload(config, dry_run=False):
         if script.get("first_comment"):
             youtube.comment(yt, video_id, script["first_comment"])
         notify(f"✅ 업로드 완료: {script['title']}\nhttps://youtube.com/shorts/{video_id}")
+        _add_to_linkpage(record, config)
     else:
         notify(f"🧪 테스트 모드: 업로드 없이 영상만 만들었어요 → {video}")
 
@@ -146,7 +147,19 @@ def write_upload_sheet(workdir, script, config):
     (workdir / "READY").write_text("검수·업로드 대기 중\n", encoding="utf-8")
 
 
-def sync_manual_uploads():
+def _add_to_linkpage(record, config):
+    if not record.get("item_no"):
+        return
+    from . import linkpage
+
+    try:
+        linkpage.add_item(record["item_no"], record["item_name"], record["link"], record.get("item_desc", ""), config)
+    except Exception as e:  # 링크 페이지 실패가 업로드 기록을 막으면 안 된다
+        log.error("링크 페이지 갱신 실패: %s", e)
+        notify(f"❌ 링크 페이지 갱신 실패 ({record['item_no']}번): {e}")
+
+
+def sync_manual_uploads(config=None):
     """Cowork가 남긴 uploaded.txt / rejected.txt를 읽어 상태에 반영한다."""
     state = load_state()
     changed = False
@@ -160,6 +173,8 @@ def sync_manual_uploads():
             if m:
                 v["id"], v["status"] = m.group(1), "uploaded"
                 changed = True
+                if config is not None:
+                    _add_to_linkpage(v, config)
         elif rejected.exists():
             v["status"] = "rejected"
             v["reject_reason"] = rejected.read_text(encoding="utf-8").strip()[:500]
@@ -208,7 +223,7 @@ def handle_comments(config):
 def update_stats(config):
     from . import youtube
 
-    sync_manual_uploads()
+    sync_manual_uploads(config)
     state = load_state()
     ids = [v["id"] for v in state["videos"] if v.get("id")]
     if not ids:

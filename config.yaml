@@ -23,6 +23,10 @@ shopping:
     avatar_id: ""
     caption_id: ""
 
+# 프로필에 걸어 둔 상품 모음 페이지 (linkpage 폴더). 영상마다 번호가 자동으로 붙어요.
+linkpage:
+  url: "https://sseulmotem.netlify.app"
+
 channel:
   name: "쓸모템"
   short_name: "쓸모템"

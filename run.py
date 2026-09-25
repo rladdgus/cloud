@@ -6,6 +6,8 @@
   python run.py once              영상 1개를 만들어 바로 업로드
   python run.py comments          댓글 한 번 처리
   python run.py start             자동 운영 시작 (컴퓨터를 켜 두면 계속 동작)
+  python run.py link-add 이름 링크 [설명]   링크 페이지에 상품을 직접 추가 (번호 자동)
+  python run.py link-publish      링크 페이지를 Netlify에 다시 배포
 """
 import logging
 import sys
@@ -57,7 +59,7 @@ def start(config):
             save_state(state)
             safe("영상 제작/업로드", jobs.make_and_upload, config)
         if now >= next_comments:
-            safe("수동 업로드 반영", jobs.sync_manual_uploads)
+            safe("수동 업로드 반영", jobs.sync_manual_uploads, config)
             safe("댓글 관리", jobs.handle_comments, config)
             next_comments = now + timedelta(minutes=sched["comment_check_minutes"])
         if now >= next_stats:
@@ -88,6 +90,20 @@ def main():
         jobs.handle_comments(config)
     elif cmd == "stats":
         jobs.update_stats(config)
+    elif cmd == "link-add":
+        from ytauto import linkpage
+
+        if len(sys.argv) < 4:
+            print('사용법: python run.py link-add "상품명" "쿠팡 링크" ["한 줄 설명"]')
+            return
+        no = linkpage.reserve_number()
+        linkpage.add_item(no, sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "", config)
+        print(f"{no}번으로 추가했어요.")
+    elif cmd == "link-publish":
+        from ytauto import linkpage
+
+        linkpage.render()
+        linkpage.publish(config)
     elif cmd == "start":
         start(config)
     else:

@@ -3,7 +3,7 @@ import json
 
 import re
 
-from . import coupang, llm, media, studio, topview
+from . import coupang, linkpage, llm, media, studio, topview
 from .common import ROOT, log, notify
 
 QUEUE_FILE = ROOT / "products.txt"
@@ -12,6 +12,8 @@ SCRIPT_SCHEMA = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "product_name": {"type": "string"},
+        "short_desc": {"type": "string"},
         "hook_title": {"type": "string"},
         "description": {"type": "string"},
         "tags": {"type": "array", "items": {"type": "string"}},
@@ -30,7 +32,7 @@ SCRIPT_SCHEMA = {
         },
         "comment": {"type": "string"},
     },
-    "required": ["title", "hook_title", "description", "tags", "scenes", "comment"],
+    "required": ["title", "product_name", "short_desc", "hook_title", "description", "tags", "scenes", "comment"],
     "additionalProperties": False,
 }
 
@@ -55,11 +57,13 @@ PICK_SCHEMA = {
 
 WRITER_SYSTEM = """당신은 한국어 쇼핑 쇼츠(제품 소개 숏폼) 전문 작가입니다.
 - 길이: 낭독 25~40초 (전체 내레이션 150~230자), 장면 4~6개.
-- 구조: ① 3초 훅(공감되는 불편함이나 "이거 아직도 모르세요?") ② 제품이 해결하는 방식 ③ 핵심 장점 2~3개 ④ 짧은 마무리 + "링크는 설명란" 안내.
+- 구조: ① 3초 훅(공감되는 불편함이나 "이거 아직도 모르세요?") ② 제품이 해결하는 방식 ③ 핵심 장점 2~3개 ④ 짧은 마무리 + "프로필 링크 N번" 안내 (N은 프롬프트에 주어지는 상품 번호).
 - 반드시 지킬 것 (표시광고법·YouTube 정책):
   · 직접 써 본 척하는 가짜 후기("제가 써봤는데", "한 달 써보니") 금지. "~라고 해요", "~할 수 있어요"처럼 소개하는 말투로.
   · 확인할 수 없는 수치, "최저가", "1위", "완벽", 질병 치료·예방이나 다이어트 효과 같은 의학적 주장 금지.
   · 가격은 바뀔 수 있으니 구체적 금액을 말하지 말 것.
+- product_name: 링크 페이지에 표시할 간단한 상품명 12자 이내 (브랜드·용량·색상 빼고, 예: "접이식 실리콘 설거지통").
+- short_desc: 링크 페이지용 한 줄 설명 25자 이내, 상품의 쓰임새만 사실대로 (예: "접으면 납작해지는 싱크대 설거지통").
 - hook_title: 영상 내내 위쪽에 고정되는 8~16자 제목 (예: "좁은 싱크대 필수템").
 - caption: 해당 장면의 핵심 8~16자 문구 (자막이 없을 때 대체용).
 - motion_prompt: 제품 사진을 짧은 영상으로 만들 때 쓸 영어 카메라 연출 1문장 (예: "Slow push-in on the product on a clean kitchen counter"). 제품 모양·색은 바꾸지 말 것.
@@ -133,12 +137,14 @@ def pick_product(config, state):
     return product
 
 
-def write_and_review(config, product):
+def write_and_review(config, product, item_no):
     model = config["claude"]["model"]
     info = f"상품명: {product.get('name') or '(링크에서 확인)'}\n카테고리: {product.get('category', '')}\n링크: {product['link']}"
     if product.get("rocket"):
         info += "\n로켓배송 상품"
-    prompt = f"{info}\n\n이 상품의 쇼핑 쇼츠 대본을 쓰세요."
+    prompt = (f"{info}\n상품 번호: {item_no}번\n\n이 상품의 쇼핑 쇼츠 대본을 쓰세요. "
+              f"마지막 장면 내레이션은 \"자세한 건 프로필 링크 {item_no}번에서 확인하세요\"처럼 끝내고, "
+              f"그 장면 caption은 \"프로필 링크 {item_no}번\"으로 하세요.")
     script = llm.ask_json(model, WRITER_SYSTEM, prompt, SCRIPT_SCHEMA)
     for attempt in range(config["quality"]["max_rewrites"] + 1):
         review = llm.ask_json(model, REVIEW_SYSTEM, f"{info}\n\n대본:\n{json.dumps(script, ensure_ascii=False)}",
@@ -157,7 +163,7 @@ def write_and_review(config, product):
     return None
 
 
-def produce(config, state, workdir):
+def produce(config, state, workdir, dry_run=False):
     """(script, video_path, record)를 돌려준다. 만들 수 없으면 None."""
     shop = config["shopping"]
     product = pick_product(config, state)
@@ -165,7 +171,9 @@ def produce(config, state, workdir):
         notify("⚠️ 올릴 상품이 없어요. products.txt에 쿠팡 파트너스 링크를 추가해 주세요.")
         return None
 
-    script = write_and_review(config, product)
+    # 테스트 모드에서는 번호를 미리 보기만 하고 예약하지 않는다
+    item_no = linkpage.peek_number() if dry_run else linkpage.reserve_number()
+    script = write_and_review(config, product, item_no)
     if script is None:
         notify(f"⚠️ [{product.get('name') or product['link']}] 대본이 검수를 통과하지 못해 건너뛰었어요.")
         return None
@@ -193,13 +201,20 @@ def produce(config, state, workdir):
             notify(f"⚠️ [{product['link']}] 제품 사진을 받을 수 없어요. "
                    "products.txt에 '링크 | 상품명 | 이미지주소' 형식으로 넣어 주세요.")
             return None
-        studio.build(script, product, image, workdir, config).replace(final)
+        studio.build(script, product, image, workdir, config, item_no=item_no).replace(final)
 
     footer = config["channel"].get("description_footer", "")
+    page = linkpage.page_url(config)
+    profile = f"👉 프로필 링크 {item_no}번: {page}" if page else f"👉 프로필 링크 {item_no}번"
+    script["item_no"] = item_no
     script["full_description"] = (
-        f"{script['description']}\n\n👉 제품 보러 가기: {product['link']}\n\n{shop['disclosure']}\n\n{footer}"
+        f"{script['description']}\n\n{profile}\n👉 바로 보기: {product['link']}\n\n{shop['disclosure']}\n\n{footer}"
     )
-    script["first_comment"] = f"{script['comment']}\n👉 {product['link']}\n({shop['disclosure_short']})"
-    record = {"series": "shopping", "topic": product.get("name") or product["link"],
-              "product_id": product["id"], "category": product.get("category", "")}
+    script["first_comment"] = (
+        f"{script['comment']}\n{profile}\n👉 {product['link']}\n({shop['disclosure_short']})"
+    )
+    record = {"series": "shopping", "topic": product.get("name") or script["product_name"],
+              "product_id": product["id"], "category": product.get("category", ""),
+              "item_no": item_no, "item_name": script["product_name"],
+              "item_desc": script["short_desc"], "link": product["link"]}
     return script, final, record

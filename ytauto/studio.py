@@ -154,7 +154,7 @@ def _font(config, size):
     return ImageFont.truetype(media.find_font(config), size)
 
 
-def base_frame(product_image, hook, notice, index, total, config):
+def base_frame(product_image, hook, notice, index, total, config, item_no=None):
     """자막을 뺀 고정 화면 (배경, 광고 표시, 훅 제목, 진행 막대)."""
     img = ImageEnhance.Brightness(
         media._cover(product_image, W, H).filter(ImageFilter.GaussianBlur(40))).enhance(0.35)
@@ -172,6 +172,14 @@ def base_frame(product_image, hook, notice, index, total, config):
 
     draw.rounded_rectangle([CARD_X - 6, CARD_Y - 6, CARD_X + CARD + 6, CARD_Y + CARD + 6], radius=36,
                            fill=(255, 255, 255))
+    if item_no:
+        # 카드 아래 고정 배지: 시청자가 번호를 기억하도록
+        f_chip = _font(config, 46)
+        chip = f"프로필 링크 {item_no}번"
+        cw = draw.textlength(chip, font=f_chip)
+        draw.rounded_rectangle([(W - cw) / 2 - 28, 1672, (W + cw) / 2 + 28, 1744], radius=36,
+                               fill=(255, 225, 60))
+        draw.text((W / 2, 1708), chip, font=f_chip, fill=(20, 20, 20), anchor="mm")
     bar_w = (W - 200) / total
     for i in range(total):
         color = (255, 225, 60) if i <= index else (80, 80, 80)
@@ -204,7 +212,7 @@ def caption_png(text, path, config):
 
 # ---------- 합성 ----------
 
-def build(script, product, product_image, workdir, config):
+def build(script, product, product_image, workdir, config, item_no=None):
     workdir = Path(workdir)
     scenes = script["scenes"]
     fps = config["video"]["fps"]
@@ -223,7 +231,7 @@ def build(script, product, product_image, workdir, config):
         words = narrate(scene["narration"], audio, config)
         dur = media.duration(audio) + 0.2
         base = workdir / f"b{i}.png"
-        base_frame(product_image, script["hook_title"], notice, i, len(scenes), config).save(base)
+        base_frame(product_image, script["hook_title"], notice, i, len(scenes), config, item_no).save(base)
 
         caps = caption_chunks(words) or [(scene["caption"], 0, dur)]
         inputs = ["-loop", "1", "-framerate", str(fps), "-i", str(base)]
